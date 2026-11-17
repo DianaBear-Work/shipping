@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: github-pages
-  cancel-in-progress: true
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -33,9 +33,9 @@ jobs:
         uses: actions/configure-pages@v5
       - name: Prepare site
         run: |
-          mkdir -p _site
-          cp -R shipping/. _site/
-          cp shipping/package-tracker.html _site/index.html
+          mkdir -p _site/shipping
+          cp -R shipping/. _site/shipping/
+          cp index.html _site/index.html
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v4
         with:

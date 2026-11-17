@@ -32,7 +32,10 @@
   let activeDetailForm = "";
   let cameraStream = null;
   let cameraFrame = 0;
+  let cameraRequestId = 0;
   let barcodeDetector = null;
+  let zxingControls = null;
+  let zxingLoadPromise = null;
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -432,31 +435,94 @@
 
   async function startCamera() {
     const status = $("#scan-status");
+    const requestId = ++cameraRequestId;
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       setMessage(status, "Camera scanning requires a secure connection (HTTPS) and a supported browser. Enter the package ID or use a handheld scanner instead.", "error");
       return;
     }
-    if (typeof window.BarcodeDetector !== "function") {
-      setMessage(status, "This browser does not support built-in QR scanning. Enter the package ID or use a handheld scanner instead.", "error");
-      return;
-    }
 
     try {
-      barcodeDetector = new window.BarcodeDetector({ formats: ["qr_code", "code_128", "code_39", "upc_a", "upc_e", "ean_13", "ean_8"] });
-      cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
       const video = $("#camera-video");
-      video.srcObject = cameraStream;
       $("#camera-frame").hidden = false;
-      await video.play();
+
+      if (typeof window.BarcodeDetector === "function") {
+        barcodeDetector = new window.BarcodeDetector({ formats: ["qr_code", "code_128", "code_39", "upc_a", "upc_e", "ean_13", "ean_8"] });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+        if (requestId !== cameraRequestId) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
+        cameraStream = stream;
+        video.srcObject = cameraStream;
+        await video.play();
+        if (requestId !== cameraRequestId) return;
+        setMessage(status, "Camera active. Point it at a package barcode or QR label.");
+        scanVideoFrame();
+        return;
+      }
+
+      setMessage(status, "Loading camera scanning support...");
+      const zxing = await loadZXingBrowser();
+      if (requestId !== cameraRequestId) return;
+      const reader = new zxing.BrowserMultiFormatReader();
+      const controls = await reader.decodeFromConstraints(
+        { video: { facingMode: { ideal: "environment" } }, audio: false },
+        video,
+        result => {
+          if (requestId !== cameraRequestId || !result) return;
+          const value = result.getText();
+          stopCamera();
+          showScanResult(value);
+        }
+      );
+      if (requestId !== cameraRequestId) {
+        controls.stop();
+        return;
+      }
+      zxingControls = controls;
       setMessage(status, "Camera active. Point it at a package barcode or QR label.");
-      scanVideoFrame();
     } catch (error) {
+      if (requestId !== cameraRequestId) return;
       stopCamera();
       const explanation = error && error.name === "NotAllowedError"
         ? "Camera access was denied. Allow camera access or enter the package ID."
-        : "Could not start the camera. Enter the package ID or use a handheld scanner instead.";
+        : error instanceof Error && error.message
+          ? error.message
+          : "Could not start the camera. Enter the package ID or use a handheld scanner instead.";
       setMessage(status, explanation, "error");
     }
+  }
+
+  function loadZXingBrowser() {
+    if (window.ZXingBrowser?.BrowserMultiFormatReader) {
+      return Promise.resolve(window.ZXingBrowser);
+    }
+    if (!zxingLoadPromise) {
+      zxingLoadPromise = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/zxing-browser.min.js";
+        script.integrity = "sha384-ylLhng89kD62+PVK1cjm4rAYg69zDlGrbbSfAE2Eb8Xqf8RoAQCMcRoUXZh7pAPC";
+        script.crossOrigin = "anonymous";
+        script.async = true;
+        script.onload = () => {
+          if (window.ZXingBrowser?.BrowserMultiFormatReader) {
+            resolve(window.ZXingBrowser);
+          } else {
+            script.remove();
+            reject(new Error("Camera scanning support could not be initialized. Reload the page and try again."));
+          }
+        };
+        script.onerror = () => {
+          script.remove();
+          reject(new Error("Could not load camera scanning support. Check your internet connection and try again."));
+        };
+        document.head.append(script);
+      }).catch(error => {
+        zxingLoadPromise = null;
+        throw error;
+      });
+    }
+    return zxingLoadPromise;
   }
 
   async function scanVideoFrame() {
@@ -481,8 +547,11 @@
   }
 
   function stopCamera() {
+    cameraRequestId += 1;
     if (cameraFrame) window.cancelAnimationFrame(cameraFrame);
     cameraFrame = 0;
+    if (zxingControls) zxingControls.stop();
+    zxingControls = null;
     if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
     cameraStream = null;
     barcodeDetector = null;
