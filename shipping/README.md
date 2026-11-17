@@ -10,6 +10,14 @@ dashboard and interactive session-only workflows for registering, searching,
 scanning/looking up, moving, updating the status of, and marking packages as
 picked up.
 
+## Public demo website
+
+Once GitHub Pages is enabled and the first deployment succeeds, the demo will
+be available at https://dianabear-work.github.io/shipping/. The source
+repository and website are public. Do not enter real package, carrier, or
+employee information. Updates to `main` deploy automatically through the
+GitHub Actions workflow.
+
 **Prototype warning:** do not enter real package, carrier, or employee
 information. Records exist only in the current page memory and disappear when
 you reload. The page has no Microsoft sign-in, SharePoint connection, durable
